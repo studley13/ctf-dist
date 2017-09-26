@@ -1,0 +1,5 @@
+#!/bin/bash
+set -e
+
+# Constants for your challenge
+export CHALLENGE_PORT="1026"

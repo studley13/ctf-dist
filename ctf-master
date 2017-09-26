@@ -1,0 +1,136 @@
+#!/bin/bash
+set -e
+
+cd $(dirname $0)
+
+# This script is used to push and control the challenge on the AWS
+# servers. You can start, stop and push your challenge to the
+# server. When setting the variables below to reserve a box or port,
+# please maxe sure to record which port you are planning to use
+# on https://goo.gl/Vvvw1t
+# Make sure to check you're using a port that no-one else has requested.
+
+CHALLENGE_ROOT="challenges/"
+CHALLENGE_ID="challenge"
+CHALLENGE_PORT="9999"
+HELP=0
+
+SERVER="k17ctf.win"
+LOGIN="ctf@${SERVER}"
+LOCAL_PORT=9091
+
+# Load the constants
+while getopts "hi:b:p:" opt; do
+    case $opt in
+        h)
+            HELP=1
+            ;;
+        i)
+            CHALLENGE_ID="$OPTARG"
+            ;;
+        p)
+            CHALLENGE_PORT="$OPTARG"
+            ;;
+        *)
+            exit
+            ;;
+    esac
+done
+
+COMMAND="${!OPTIND}"
+
+# LEAVE THESE
+CHALLENGE_PREFIX="ctf"
+
+# Push the current version of the challenge to the server
+ctfPush () {
+    pushd "${CHALLENGE_ROOT}/${CHALLENGE_ID}"
+    source ./ctf.sh
+
+    # Compress the payload
+    pushd content/
+    tar -cjf ../content.tar.bz2 .
+    popd
+
+    echo "Pushing up to ${SERVER}..."
+    ssh "${LOGIN}" mkdir -p "/home/ctf/${CHALLENGE_ID}/"
+    scp -p content.tar.bz2 Dockerfile "${LOGIN}:/home/ctf/${CHALLENGE_ID}/"
+
+    echo "Building Docker image on ${SERVER}..."
+    ssh "${LOGIN}" docker build -t "${CHALLENGE_PREFIX}-${CHALLENGE_ID}-image" "/home/ctf/${CHALLENGE_ID}"
+
+    echo "Starting initial run"
+    ssh "${LOGIN}" docker run -d --name "${CHALLENGE_PREFIX}-${CHALLENGE_ID}" -p ${CHALLENGE_PORT}:${LOCAL_PORT} \
+        "${CHALLENGE_PREFIX}-${CHALLENGE_ID}-image"
+
+    popd
+}
+
+# Stop the pushed version of the challenge from running
+ctfStop () {
+    echo "Stopping on ${SERVER}..."
+    ssh ${LOGIN} docker stop "${CHALLENGE_PREFIX}-${CHALLENGE_ID}"
+}
+
+# Remove the pushed version of the challenge from running
+ctfRemove () {
+    echo "Removing from ${SERVER}..."
+    ssh ${LOGIN} docker rm "${CHALLENGE_PREFIX}-${CHALLENGE_ID}"
+}
+
+# Start the pushed version of the challenge start running
+ctfStart () {
+    echo "Starting on ${SERVER}..."
+    ssh ${LOGIN} docker start "${CHALLENGE_PREFIX}-${CHALLENGE_ID}"
+}
+
+# Display the status on each server
+showStatus () {
+    echo "Status of ${SERVER}:"
+    ssh ${LOGIN} docker ps -a
+}
+
+# Display help
+showHelp () {
+    echo "Usage: ${0} -i id -p port command"
+    echo
+    echo "Options:"
+    echo "    -i id   The id for the challenge"
+    echo "    -p port The port to run the challenge on"
+    echo "    -h      Show this help text"
+    echo
+    echo "Commands:"
+    echo "    push          Push this challenge and install"
+    echo "    start         Start the challenge running from the boxes"
+    echo "    stop          Stop the challenge running on the boxes"
+    echo "    remove        Remove the challenge from the boxes"
+    echo "    status        Display status for the servers"
+    echo
+}
+
+if [ $HELP -ne 0 ]; then
+    showHelp
+else
+    case "$COMMAND" in
+        "push")
+            ctfPush
+            ;;
+        "start")
+            ctfStart
+            ;;
+        "stop")
+            ctfStop
+            ;;
+        "remove")
+            ctfRemove
+            ;;
+        "status")
+            showStatus
+            ;;
+        *)
+            echo "Invalid command \"${COMMAND}\""
+            ;;
+    esac
+fi
+
+#ctfPush
